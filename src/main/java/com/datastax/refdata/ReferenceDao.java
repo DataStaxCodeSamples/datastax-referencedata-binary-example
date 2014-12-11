@@ -6,6 +6,7 @@ import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,7 @@ import com.datastax.refdata.model.HistoricData;
 public class ReferenceDao {
 
 	private static Logger logger = LoggerFactory.getLogger(ReferenceDao.class);
-	private long TOTAL_POINTS = 0;
+	private AtomicLong TOTAL_POINTS = new AtomicLong(0);
 	private Session session;
 	private static String keyspaceName = "datastax_referencedata_binary_demo";
 	private static String tableNameHistoric = keyspaceName + ".historic_data";
@@ -32,7 +33,7 @@ public class ReferenceDao {
 	private static String tableNameMetaData = keyspaceName + ".exchange_metadata";
 
 	private static final String INSERT_INTO_HISTORIC = "Insert into " + tableNameHistoric
-			+ " (exchange,symbol,dates,ticks) values (?,?,?,?);";
+			+ " (exchange,symbol,dates,closes,opens,highs,lows,adj_closes,volumes) values (?,?,?,?,?,?,?,?,?);";
 
 	private static final String INSERT_INTO_DIVIDENDS = "Insert into " + tableNameDividends
 			+ " (exchange,symbol,date,dividend) values (?,?,?,?);";
@@ -58,6 +59,7 @@ public class ReferenceDao {
 	}
 
 	
+	@SuppressWarnings("unused")
 	public void printHistoricData (String exchange, String symbol){
 		ResultSet result = session.execute("select * from " + tableNameHistoric + " where exchange = ? and symbol = ?", exchange, symbol);		
 		Row row = result.one();
@@ -65,14 +67,20 @@ public class ReferenceDao {
 		int counter = 0;
 		
 		LongBuffer dates = row.getBytes("dates").asLongBuffer();		
-		DoubleBuffer ticks = row.getBytes("ticks").asDoubleBuffer();
+		DoubleBuffer closes = row.getBytes("closes").asDoubleBuffer();
+		DoubleBuffer highs = row.getBytes("highs").asDoubleBuffer();
+		DoubleBuffer lows = row.getBytes("lows").asDoubleBuffer();
+		DoubleBuffer opens = row.getBytes("opens").asDoubleBuffer();
+		DoubleBuffer volumes = row.getBytes("volumes").asDoubleBuffer();
+		DoubleBuffer adjCloses = row.getBytes("adj_closes").asDoubleBuffer();
 		
-//		while (dates.hasRemaining()){
-//			System.out.println(new Date(dates.get()) + "-" + ticks.get());
-//			counter++;
-//		}
 		
-		
+		while (dates.hasRemaining()){
+			Date date = new Date(dates.get()); 
+			Double d = closes.get();
+			counter++;
+		}
+				
 		logger.info ("Finished " + counter);
 	} 
 	
@@ -83,18 +91,30 @@ public class ReferenceDao {
 		HistoricData mostRecent = null;
 
 		ByteBuffer dates = ByteBuffer.allocate(list.size()*8);
-		ByteBuffer prices = ByteBuffer.allocate(list.size()*8);
+		ByteBuffer closes = ByteBuffer.allocate(list.size()*8);
+		ByteBuffer opens = ByteBuffer.allocate(list.size()*8);
+		ByteBuffer highs = ByteBuffer.allocate(list.size()*8);
+		ByteBuffer lows = ByteBuffer.allocate(list.size()*8);
+		ByteBuffer adjCloses = ByteBuffer.allocate(list.size()*8);
+		ByteBuffer volumes = ByteBuffer.allocate(list.size()*8);
 		
 		for (HistoricData historicData : list) {
 			mostRecent=historicData;
 			
 			dates.putLong(historicData.getDate().getTime());
-			prices.putDouble(historicData.getClose());
-			TOTAL_POINTS++;
+			closes.putDouble(historicData.getClose());
+			opens.putDouble(historicData.getOpen());
+			highs.putDouble(historicData.getHigh());
+			lows.putDouble(historicData.getLow());
+			adjCloses.putDouble(historicData.getAdjClose());
+			volumes.putDouble(historicData.getVolume());
+			
+			TOTAL_POINTS.incrementAndGet();
 		}
 		
-		logger.info ("dates-" + dates.position() + " prices-" + prices.position());
-		session.execute(boundStmt.bind(mostRecent.getExchange(), mostRecent.getSymbol(), dates.flip(), prices.flip()));
+		logger.info ("dates-" + dates.position() + " prices-" + closes.position());
+		session.execute(boundStmt.bind(mostRecent.getExchange(), mostRecent.getSymbol(), dates.flip(), closes.flip(),
+				opens.flip(), highs.flip(), lows.flip(), adjCloses.flip(), volumes.flip()));
 		
 		//Wait till we have everything back.
 		boolean wait = true;
@@ -141,6 +161,6 @@ public class ReferenceDao {
 	}
 	
 	public long getTotalPoints(){
-		return TOTAL_POINTS;
+		return TOTAL_POINTS.get();
 	}
 }
